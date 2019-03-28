@@ -14,8 +14,8 @@ library(RColorBrewer)
 library(plotly)
 library(DT)
 
-a<-readRDS("../data/annotation.rds")
-g<-readRDS("../data/gil_data.rds")
+a<-readRDS("../data/annotation.rds") ###Sort out factors
+g<-readRDS("../data/gil_data.rds") ### sort out missing data
 s<-readRDS("../data/spencer_data.rds")
 
 cols<-brewer.pal(n = 9,name = "Set1")[c(3,1)]
@@ -38,8 +38,11 @@ ui<-shinyUI(dashboardPage(
       tabItem(tabName="home",
               fluidRow(
                 box(
-                  title="Gene Information",width = 12,status="primary",solidHeader=F,
-                  textInput("gene",label = "Gene",value = a$Gene.ID[1]),
+                  title="Gene Search",width = 9,status="primary",solidHeader=F,
+                  div(style = 'overflow-x: scroll', dataTableOutput('anno'))
+                ),
+                box(
+                  title="Selected Gene",width = 3,status="primary",solidHeader=F,
                   div(style = 'overflow-x: scroll', dataTableOutput('linksTable'))
                 ),
                 box(
@@ -82,40 +85,58 @@ ui<-shinyUI(dashboardPage(
 )
 
 # Define server logic required to draw a histogram
-server <- function(input, output) {
+server <- function(input, output){
   
-  output$linksTable = renderDataTable({
-    mtcars
-    gene<-input$gene
-    df<-subset(a,a$Gene.ID %in% gene)
-    df$Gene_Card<-paste0("<a href='https://www.genecards.org/cgi-bin/carddisp.pl?gene=",gene,"' target='_blank'>Gene Cards</a>")
-    return(datatable(df,escape = F))
-  },options = list(bSortClasses = TRUE,iDisplayLength = 5)
-  )
+  output$anno = DT::renderDT({
+    return(DT::datatable(a,selection = 'single',filter="bottom",
+                         options = list(bSortClasses = TRUE,
+                                        aLengthMenu = c(5,10,20,50),
+                                        pageLength = 5
+                                        )))
+  })
+
+  genes<-reactive({
+    if(length(input$anno_rows_selected)==0){
+      genes<-a[input$anno_rows_all[1],]
+    }
+    else{
+      genes<-a[input$anno_rows_selected[1],]
+    }
+    return(genes)
+  })
+  
+  output$linksTable = DT::renderDT({
+    gene<-genes()
+    geneC<-paste0("<a href='https://www.genecards.org/cgi-bin/carddisp.pl?gene=",gene$Gene.ID,"' target='_blank'>Gene Cards</a>")
+    hpa<-paste0("<a href='https://www.proteinatlas.org/",gene$Gene.ID,"' target='_blank'>Human Protein Atlas</a>")
+    df<-data.frame(links=c(geneC,hpa))
+    names(df)<-gene$Gene.Symbol
+    return(DT::datatable(df,escape = F,options=list(paging=F,searching=F)))
+  })
   
   output$gilPlot <- renderPlotly({
-    #
-    gene<-input$gene
-    gs<-subset(g,g$Gene.ID %in% gene) %>% spread(measurement,value)
+    gene<-genes()
+    gs<-subset(g,g$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
     gs$adj.p.value<-factor(gs$adj.p.value)
     gs$adj.p.value<-fct_recode(gs$adj.p.value,`Significant <=0.05`="1",`>0.05`="0")
     
     g1<-ggplot(gs,aes(x=Experiment,y=log2FoldChange,fill=adj.p.value,text=paste("padj:",padj,"baseMean:",baseMean)))+geom_bar(stat="identity")+
       theme_bw()+scale_fill_manual(values = c(`Significant <=0.05`=cols[1],`>0.05`=cols[2]))+
-      theme(axis.text.x = element_text(angle = 90, hjust = 1,size=10))
+      theme(axis.text.x = element_text(angle = 90, hjust = 1,size=10))+
+      ggtitle(as.character(gene$Gene.Symbol))
     ggplotly(g1)
   })
 
   output$spencerPlot <- renderPlotly({
-    #
-    gene<-input$gene
-    ss<-subset(s,s$Gene.ID %in% gene) %>% spread(measurement,value)
+    gene<-genes()
+    ss<-subset(s,s$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
     ss$adj.p.value<-factor(ss$adj.p.value)
     ss$adj.p.value<-fct_recode(ss$adj.p.value,`Significant <=0.05`="1",`>0.05`="0")
     
     g2<-ggplot(ss,aes(x=Experiment,y=log2FoldChange,fill=adj.p.value,text=paste("padj:",padj)))+geom_bar(stat="identity")+
       theme_bw()+scale_fill_manual(values = c(`Significant <=0.05`=cols[1],`>0.05`=cols[2]))+
-      theme(axis.text.x = element_text(angle = 90, hjust = 1,size=10))
+      theme(axis.text.x = element_text(angle = 90, hjust = 1,size=10))+
+      ggtitle(as.character(gene$Gene.Symbol))
     ggplotly(g2)
   })
 }
