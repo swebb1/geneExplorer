@@ -15,10 +15,9 @@ library(plotly)
 library(DT)
 
 a<-readRDS("../data/annotation.rds") ###Sort out factors
-g<-readRDS("../data/gil_data.rds") ### sort out missing data
-s<-readRDS("../data/spencer_data.rds")
+r<-readRDS("../data/rna_data.rds") ### sort out missing data
 
-cols<-brewer.pal(n = 9,name = "Set1")[c(3,1)]
+cols<-c(brewer.pal(n = 9,name = "Set1")[3],"grey39")
 
 ui<-shinyUI(dashboardPage(
   title="Gene explorer",
@@ -46,8 +45,9 @@ ui<-shinyUI(dashboardPage(
                   div(style = 'overflow-x: scroll', dataTableOutput('linksTable'))
                 ),
                 box(
-                  title="Gil Data",width = 12,status="primary",solidHeader=F,
-                  plotlyOutput("gilPlot")
+                  title="RNA-seq Data",width = 12,status="primary",solidHeader=F,
+                  numericInput("sig",label = "Significance threshold",value = 0.05,min = 0,max = 1,width=100),
+                  plotOutput("rnaPlot")
                 ),
                 box(
                   title="Spencer Data",width = 12,status="primary",solidHeader=F,
@@ -113,6 +113,25 @@ server <- function(input, output){
     names(df)<-gene$Gene.Symbol
     return(DT::datatable(df,escape = F,options=list(paging=F,searching=F)))
   })
+
+  output$rnaPlot <- renderPlot({
+    sig=input$sig
+    values=cols
+    names(values)<-c(paste0(" Significant <= ",sig),paste0(" > ",sig))
+    gene<-genes()
+    rs<-subset(r,r$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
+    
+    g1<-ggplot(rs %>% mutate(fill = ifelse(padj<=sig,paste0(" Significant <= ",sig),paste0(" > ",sig))),
+        aes(text=paste("padj:",padj)))+
+      geom_col(aes(x=Experiment,y=log2FoldChange,fill=fill))+
+      scale_fill_manual(values = values)+
+      theme_bw()+
+      theme(axis.text.x = element_text(angle = 90, hjust = 1,size=10),legend.title = element_blank())+
+      ggtitle(as.character(gene$Gene.Symbol))+
+      facet_grid(Lab~.,scales="free",space="free")+
+      coord_flip()
+    g1
+  })
   
   output$gilPlot <- renderPlotly({
     gene<-genes()
@@ -120,7 +139,8 @@ server <- function(input, output){
     gs$adj.p.value<-factor(gs$adj.p.value)
     gs$adj.p.value<-fct_recode(gs$adj.p.value,`Significant <=0.05`="1",`>0.05`="0")
     
-    g1<-ggplot(gs,aes(x=Experiment,y=log2FoldChange,fill=adj.p.value,text=paste("padj:",padj,"baseMean:",baseMean)))+geom_bar(stat="identity")+
+    g1<-ggplot(gs,aes(x=Experiment,y=log2FoldChange,fill=adj.p.value,text=paste("padj:",padj,"baseMean:",baseMean)))+
+      geom_col(position = position_dodge(width=1))+
       theme_bw()+scale_fill_manual(values = c(`Significant <=0.05`=cols[1],`>0.05`=cols[2]))+
       theme(axis.text.x = element_text(angle = 90, hjust = 1,size=10))+
       ggtitle(as.character(gene$Gene.Symbol))
@@ -133,7 +153,8 @@ server <- function(input, output){
     ss$adj.p.value<-factor(ss$adj.p.value)
     ss$adj.p.value<-fct_recode(ss$adj.p.value,`Significant <=0.05`="1",`>0.05`="0")
     
-    g2<-ggplot(ss,aes(x=Experiment,y=log2FoldChange,fill=adj.p.value,text=paste("padj:",padj)))+geom_bar(stat="identity")+
+    g2<-ggplot(ss,aes(x=Experiment,y=log2FoldChange,fill=adj.p.value,text=paste("padj:",padj)))+
+      geom_col(position = position_dodge2(width=1,preserve = "single"))+
       theme_bw()+scale_fill_manual(values = c(`Significant <=0.05`=cols[1],`>0.05`=cols[2]))+
       theme(axis.text.x = element_text(angle = 90, hjust = 1,size=10))+
       ggtitle(as.character(gene$Gene.Symbol))
