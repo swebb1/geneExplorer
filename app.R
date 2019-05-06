@@ -6,6 +6,7 @@
 #
 #    http://shiny.rstudio.com/
 #
+#
 
 library(shiny)
 library(shinydashboard)
@@ -14,8 +15,9 @@ library(RColorBrewer)
 library(plotly)
 library(DT)
 
-a<-readRDS("../data/annotation.rds") ###Sort out factors
-r<-readRDS("../data/rna_data.rds") ### sort out missing data
+a<-readRDS("annotation.rds") ###Sort out factors
+r<-readRDS("rna_data.rds") ### sort out missing data and merged data
+p<-readRDS("prot.rds") 
 
 cols<-c(brewer.pal(n = 9,name = "Set1")[3],"grey39")
 cols2<-c(brewer.pal(n = 9,name = "Set1")[2],"grey39")
@@ -51,8 +53,9 @@ ui<-shinyUI(dashboardPage(
                   plotOutput("rnaPlot")
                 ),
                 box(
-                  title="Proteomics Data",width = 12,status="primary",solidHeader=F
-                  #plotOutput("lyPlot")
+                  title="Proteomics Data",width = 12,status="primary",solidHeader=F,
+                  numericInput("sig2",label = "Significance threshold",value = 0.05,min = 0,max = 1,width=100),
+                  plotOutput("protPlot")
                 ),
                 box(
                   title="Download table",width = 12,status="primary",solidHeader=F
@@ -121,6 +124,26 @@ server <- function(input, output){
       theme(text = element_text(size=20),legend.title = element_blank())+
       ggtitle(as.character(gene$Gene.Symbol))+
       facet_grid(Lab~.,scales="free",space="free")+
+      coord_flip()
+    g1
+  })
+  
+  output$protPlot <- renderPlot({
+    sig2=input$sig2
+    values=cols
+    names(values)<-c(paste0(" Significant <= ",sig2),paste0(" > ",sig2))
+    gene<-genes()
+    ###!!!HERE!!!###
+    ps<-subset(p,p$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
+    
+    g1<-ggplot(ps %>% mutate(fill = ifelse(pval<=sig2,paste0(" Significant <= ",sig2),paste0(" > ",sig2))),
+               aes(text=paste("pval:",pval)))+
+      geom_col(aes(x=Experiment,y=FoldChange,fill=fill))+
+      scale_fill_manual(values = values)+
+      theme_bw()+
+      theme(text = element_text(size=20),legend.title = element_blank())+
+      ggtitle(as.character(gene$Gene.Symbol))+
+      facet_grid(paste(ID,":",Sequence)~Uniprot.ID)+#,scales="free",space="free")+
       coord_flip()
     g1
   })
