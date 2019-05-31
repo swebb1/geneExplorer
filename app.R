@@ -55,6 +55,8 @@ ui<-shinyUI(dashboardPage(
                 box(
                   title="Proteomics Data",width = 12,status="primary",solidHeader=F,
                   numericInput("sig2",label = "Significance threshold",value = 0.05,min = 0,max = 1,width=100),
+                  uiOutput("protSelect"),
+                  uiOutput("pepSelect"),
                   plotOutput("protPlot")
                 ),
                 box(
@@ -99,6 +101,12 @@ server <- function(input, output){
     return(genes)
   })
   
+  peptides<-reactive({
+    gene<-genes()
+    ps<-subset(p,p$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
+    return(ps)
+  })
+  
   output$linksTable = DT::renderDT({
     gene<-genes()
     ensembl<-paste0("<a href='https://www.ensembl.org/Homo_sapiens/Gene/Idhistory?g=",gene$Gene.ID,"' target='_blank'>Ensembl</a>")
@@ -128,23 +136,39 @@ server <- function(input, output){
     g1
   })
   
+  output$protSelect<-renderUI({
+    ps<-peptides()
+    choices<-unique(ps$Uniprot.ID)
+    selectInput("protSelect",label="Select Protein:", choices=choices,multiple = F,width = 200)
+  })
+  
+  output$pepSelect<-renderUI({
+    ps<-peptides()
+    choices<-unique(ps$ID)
+    selectInput("pepSelect",label="Select Peptide:", choices=choices,multiple = F,width = 200)
+  })
+  
   output$protPlot <- renderPlot({
     sig2=input$sig2
     values=cols
     names(values)<-c(paste0(" Significant <= ",sig2),paste0(" > ",sig2))
     gene<-genes()
     ###!!!HERE!!!###
-    ps<-subset(p,p$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
-    
-    g1<-ggplot(ps %>% mutate(fill = ifelse(pval<=sig2,paste0(" Significant <= ",sig2),paste0(" > ",sig2))),
+    ps<-peptides()
+    #if(dim(ps)[1]==0){
+    #  return(NULL)
+    #}
+    pss<-subset(ps,ps$Uniprot.ID==input$protSelect & ps$ID==input$pepSelect)
+    g1<-ggplot(pss %>% mutate(fill = ifelse(pval<=sig2,paste0(" Significant <= ",sig2),paste0(" > ",sig2))),
                aes(text=paste("pval:",pval)))+
       geom_col(aes(x=Experiment,y=FoldChange,fill=fill))+
       scale_fill_manual(values = values)+
       theme_bw()+
       theme(text = element_text(size=20),legend.title = element_blank())+
       ggtitle(as.character(gene$Gene.Symbol))+
-      facet_grid(paste(ID,":",Sequence)~Uniprot.ID)+#,scales="free",space="free")+
+      facet_grid(ID~Uniprot.ID)+#,scales="free",space="free")+
       coord_flip()
+    ##NEED SEQUENCE SOMEWHERE!!
     g1
   })
   
