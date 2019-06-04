@@ -24,7 +24,7 @@ cols2<-c(brewer.pal(n = 9,name = "Set1")[2],"grey39")
 
 ui<-shinyUI(dashboardPage(
   title="Gene explorer",
-  skin="red",
+  skin="blue",
   dashboardHeader(title = "Gene Explorer", titleWidth = 400),
   dashboardSidebar(width=220,
                    sidebarMenu(
@@ -48,21 +48,29 @@ ui<-shinyUI(dashboardPage(
                   div(style = 'overflow-x: scroll', dataTableOutput('linksTable'))
                 ),
                 box(
-                  title="RNA-seq Data",width = 12,status="primary",solidHeader=F,
+                  title="RNA-seq Data",width = 6,status="primary",solidHeader=F,
                   numericInput("sig",label = "Significance threshold",value = 0.05,min = 0,max = 1,width=100),
                   plotOutput("rnaPlot")
                 ),
                 box(
-                  title="Proteomics Data",width = 12,status="primary",solidHeader=F,
+                  title="Proteomics Data",width = 9,status="primary",solidHeader=F,
                   numericInput("sig2",label = "Significance threshold",value = 0.05,min = 0,max = 1,width=100),
-                  uiOutput("protSelect"),
-                  uiOutput("pepSelect"),
-                  plotOutput("protPlot")
+                  div(style = 'overflow-x: scroll', dataTableOutput('protTable'))
                 ),
                 box(
-                  title="Download table",width = 12,status="primary",solidHeader=F
-                  #uiOutput("downloadFiles")
-                )
+                  title="Selected Protein",width = 3,status="primary",solidHeader=F,
+                  div(style = 'overflow-x: scroll', dataTableOutput('plinksTable'))
+                ),
+                box(
+                  title="Proteomics Plot",width = 6,status="primary",solidHeader=F,
+                  #uiOutput("protSelect"),
+                  #uiOutput("pepSelect"),
+                  plotOutput("protPlot")
+                )#,
+                #box(
+                #  title="Download table",width = 12,status="primary",solidHeader=F
+                #  #uiOutput("downloadFiles")
+                #)
               )
       ),
       tabItem(tabName="multi",
@@ -107,13 +115,36 @@ server <- function(input, output){
     return(ps)
   })
   
+  pep<-reactive({
+    peptides<-peptides()
+    if(length(input$protTable_rows_selected)==0){
+      peps<-peptides[input$anno_rows_all[1],]
+    }
+    else{
+      peps<-peptides[input$protTable_rows_selected[1],]
+    }
+    return(peps)
+  })
+  
   output$linksTable = DT::renderDT({
     gene<-genes()
     ensembl<-paste0("<a href='https://www.ensembl.org/Homo_sapiens/Gene/Idhistory?g=",gene$Gene.ID,"' target='_blank'>Ensembl</a>")
     geneC<-paste0("<a href='https://www.genecards.org/cgi-bin/carddisp.pl?gene=",gene$Gene.ID,"' target='_blank'>Gene Cards</a>")
     hpa<-paste0("<a href='https://www.proteinatlas.org/",gene$Gene.ID,"' target='_blank'>Human Protein Atlas</a>")
+    
     df<-data.frame(links=c(ensembl,geneC,hpa))
     names(df)<-gene$Gene.Symbol
+    return(DT::datatable(df,escape = F,options=list(paging=F,searching=F)))
+  })
+  
+  output$plinksTable = DT::renderDT({
+    pep<-pep()
+    uniprot<-paste0("<a href='https://www.uniprot.org/uniprot/",unique(pep$Uniprot.ID),"' target='_blank'>Uniprot</a>")
+    pp2a<-paste0("<a href='http://proviz.ucd.ie/proviz.php?uniprot_acc=",unique(pep$Uniprot.ID),"&tools=pp2a' target='_blank'>PP2A</a>")
+    grnai<-paste0("<a href='http://www.genomernai.org/v17/geneSearch/%5B%22",unique(pep$Uniprot.ID),"%22%5D'  target='_blank'>Genome RNAi</a>" )
+    
+    df<-data.frame(links=c(uniprot,pp2a,grnai))
+    names(df)<-unique(pep$Uniprot.ID)
     return(DT::datatable(df,escape = F,options=list(paging=F,searching=F)))
   })
 
@@ -123,7 +154,9 @@ server <- function(input, output){
     names(values)<-c(paste0(" Significant <= ",sig),paste0(" > ",sig))
     gene<-genes()
     rs<-subset(r,r$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
-    
+    if(dim(rs)[1]==0){
+      return(NULL)
+    }
     g1<-ggplot(rs %>% mutate(fill = ifelse(padj<=sig,paste0(" Significant <= ",sig),paste0(" > ",sig))),
         aes(text=paste("padj:",padj)))+
       geom_col(aes(x=Experiment,y=log2FoldChange,fill=fill))+
@@ -136,36 +169,56 @@ server <- function(input, output){
     g1
   })
   
-  output$protSelect<-renderUI({
-    ps<-peptides()
-    choices<-unique(ps$Uniprot.ID)
-    selectInput("protSelect",label="Select Protein:", choices=choices,multiple = F,width = 200)
-  })
+  # output$protSelect<-renderUI({
+  #   ps<-peptides()
+  #   choices<-unique(ps$Uniprot.ID)
+  #   selectInput("protSelect",label="Select Protein:", choices=choices,multiple = F,width = 200)
+  # })
+  # 
+  # output$pepSelect<-renderUI({
+  #   ps<-peptides()
+  #   choices<-unique(ps$ID)
+  #   selectInput("pepSelect",label="Select Peptide:", choices=choices,multiple = F,width = 200)
+  # })
   
-  output$pepSelect<-renderUI({
+  output$protTable <- DT::renderDT({
     ps<-peptides()
-    choices<-unique(ps$ID)
-    selectInput("pepSelect",label="Select Peptide:", choices=choices,multiple = F,width = 200)
+    if(dim(ps)[1]==0){
+      return(NULL)
+    }
+    dt<-DT::datatable(ps,selection="single",filter="bottom",
+                         options = list(bSortClasses = TRUE,
+                                        aLengthMenu = c(1,5,10,20,50),
+                                        pageLength = 50
+                         ))
+    dt<-dt %>% formatStyle(
+      'pval',
+      target = 'row',
+      backgroundColor = styleInterval(c(0.05), c(cols[1], cols[2]))
+    )
+    dt
   })
-  
+    
+      
   output$protPlot <- renderPlot({
     sig2=input$sig2
     values=cols
     names(values)<-c(paste0(" Significant <= ",sig2),paste0(" > ",sig2))
     gene<-genes()
-    ###!!!HERE!!!###
     ps<-peptides()
-    #if(dim(ps)[1]==0){
-    #  return(NULL)
-    #}
-    pss<-subset(ps,ps$Uniprot.ID==input$protSelect & ps$ID==input$pepSelect)
+    if(dim(ps)[1]==0){
+      return(NULL)
+    }
+    pep<-pep()
+    pss<-subset(ps,ps$Uniprot.ID==unique(pep$Uniprot.ID) & ps$ID==unique(pep$ID))
+    seq<-unique(pss$Sequence)
     g1<-ggplot(pss %>% mutate(fill = ifelse(pval<=sig2,paste0(" Significant <= ",sig2),paste0(" > ",sig2))),
                aes(text=paste("pval:",pval)))+
       geom_col(aes(x=Experiment,y=FoldChange,fill=fill))+
       scale_fill_manual(values = values)+
       theme_bw()+
       theme(text = element_text(size=20),legend.title = element_blank())+
-      ggtitle(as.character(gene$Gene.Symbol))+
+      ggtitle(paste(gene$Gene.Symbol,seq))+
       facet_grid(ID~Uniprot.ID)+#,scales="free",space="free")+
       coord_flip()
     ##NEED SEQUENCE SOMEWHERE!!
