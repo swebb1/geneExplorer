@@ -14,24 +14,29 @@ library(tidyverse)
 library(RColorBrewer)
 library(plotly)
 library(DT)
+#library(Biostrings)
+library(stringr)
 
 a<-readRDS("annotation.rds") ###Sort out factors
 r<-readRDS("rna_data.rds") ### sort out missing data and merged data
-p<-readRDS("prot.rds") 
+p<-readRDS("prot.rds")
+##Move to compile and create RDS
+fa = readAAStringSet("../data/Human_Ref_Proteome_REVIEWED_2018-06-01.fasta")
+names(fa)<-str_split(names(fa),"\\|",n = 3,simplify = T)[,2]
 
 cols<-c(brewer.pal(n = 9,name = "Set1")[3],"grey39")
 cols2<-c(brewer.pal(n = 9,name = "Set1")[2],"grey39")
 
 ui<-shinyUI(dashboardPage(
-  title="Gene explorer",
+  title="Data explorer",
   skin="blue",
-  dashboardHeader(title = "Gene Explorer", titleWidth = 400),
+  dashboardHeader(title = "Data Explorer", titleWidth = 400),
   dashboardSidebar(width=220,
                    sidebarMenu(
                      #sidebarSearchForm(textId = "searchText", buttonId = "searchButton",label = "Search..."),
                      menuItem("Home",tabName="home",icon=shiny::icon("home")),
-                     menuItem("Multiple Gene Analysis",tabName="multi",icon=shiny::icon("chart-bar")),
-                     menuItem("Data Table",tabName="data",icon=shiny::icon("database"))
+                     menuItem("Multiple Gene Analysis",tabName="multi",icon=shiny::icon("chart-bar"))#,
+                     #menuItem("Data Table",tabName="data",icon=shiny::icon("database"))
                    )
   ),
   dashboardBody(
@@ -65,6 +70,7 @@ ui<-shinyUI(dashboardPage(
                   title="Proteomics Plot",width = 6,status="primary",solidHeader=F,
                   #uiOutput("protSelect"),
                   #uiOutput("pepSelect"),
+                  textOutput("pepText"),
                   plotOutput("protPlot")
                 )#,
                 #box(
@@ -181,6 +187,26 @@ server <- function(input, output){
   #   selectInput("pepSelect",label="Select Peptide:", choices=choices,multiple = F,width = 200)
   # })
   
+   seqloc<-reactive({
+     #Get peptide sequence and ID
+     pep<-pep()
+     pepseq<-pep$Sequence
+     id<-pep$Seq.ID
+
+     ##Cutout alterations
+     seq<-str_replace_all(pepseq,c("_"="","\\(.+\\)"="")) ##!!!SOME ARE (ph) not p!!!
+     seqp<-str_replace_all(seq,"p","")
+     ##Get protein sequence ##!! Loop for all isoforms?!!!
+     fas<-fa[id]
+     ##Search for sequence within protein and get starting location
+     vm<-matchPattern(seqp,fas[[1]],max.mismatch = 3,with.indels = T)
+     start<-start(vm@ranges)
+     ##Get locations of phosphorylation within sequence and protein sequence
+     loc<-as.data.frame(str_locate_all(seq,"p")[1])$start
+     rloc<-loc+(start-1)
+     rloc
+   })
+  
   output$protTable <- DT::renderDT({
     ps<-peptides()
     if(dim(ps)[1]==0){
@@ -198,27 +224,33 @@ server <- function(input, output){
     )
     dt
   })
-    
+  
+  output$pepText<-renderText({
+    gene<-genes()
+    pep<-pep()
+    ploc<-seqloc()    
+    text<-paste(c(as.character(gene$Gene.Symbol),pep$Uniprot.ID,pep$Sequence,ploc),collapse=" ")
+    return(text)
+  })
       
   output$protPlot <- renderPlot({
     sig2=input$sig2
     values=cols
     names(values)<-c(paste0(" Significant <= ",sig2),paste0(" > ",sig2))
-    gene<-genes()
+    
     ps<-peptides()
     if(dim(ps)[1]==0){
       return(NULL)
     }
     pep<-pep()
     pss<-subset(ps,ps$Uniprot.ID==unique(pep$Uniprot.ID) & ps$ID==unique(pep$ID))
-    seq<-unique(pss$Sequence)
+    
     g1<-ggplot(pss %>% mutate(fill = ifelse(pval<=sig2,paste0(" Significant <= ",sig2),paste0(" > ",sig2))),
                aes(text=paste("pval:",pval)))+
       geom_col(aes(x=Experiment,y=FoldChange,fill=fill))+
       scale_fill_manual(values = values)+
       theme_bw()+
       theme(text = element_text(size=20),legend.title = element_blank())+
-      ggtitle(paste(gene$Gene.Symbol,seq))+
       facet_grid(ID~Uniprot.ID)+#,scales="free",space="free")+
       coord_flip()
     ##NEED SEQUENCE SOMEWHERE!!
