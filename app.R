@@ -19,7 +19,8 @@ library(stringr)
 
 a<-readRDS("annotation.rds") ###Sort out factors
 r<-readRDS("rna_data.rds") ### sort out missing data and merged data
-p<-readRDS("prot.rds")
+pr<-readRDS("prot.rds")
+p<-readRDS("pep.rds")
 ##Move to compile and create RDS
 fa = readAAStringSet("../data/Human_Ref_Proteome_REVIEWED_2018-06-01.fasta")
 names(fa)<-str_split(names(fa),"\\|",n = 3,simplify = T)[,2]
@@ -60,17 +61,24 @@ ui<-shinyUI(dashboardPage(
                 box(
                   title="Proteomics Data",width = 9,status="primary",solidHeader=F,
                   numericInput("sig2",label = "Significance threshold",value = 0.05,min = 0,max = 1,width=100),
-                  div(style = 'overflow-x: scroll', dataTableOutput('protTable'))
+                  div(style = 'overflow-x: scroll', dataTableOutput('pepTable'))
                 ),
                 box(
                   title="Selected Protein",width = 3,status="primary",solidHeader=F,
                   div(style = 'overflow-x: scroll', dataTableOutput('plinksTable'))
                 ),
                 box(
-                  title="Proteomics Plot",width = 6,status="primary",solidHeader=F,
+                  title="Proteomics: Peptide Plot",width = 6,status="primary",solidHeader=F,
                   #uiOutput("protSelect"),
                   #uiOutput("pepSelect"),
                   textOutput("pepText"),
+                  plotOutput("pepPlot")
+                ),
+                box(
+                  title="Proteomics: Protein Groups Plot",width = 6,status="primary",solidHeader=F,
+                  #uiOutput("protSelect"),
+                  #uiOutput("pepSelect"),
+                  #textOutput("pepText"),
                   plotOutput("protPlot")
                 )#,
                 #box(
@@ -121,13 +129,22 @@ server <- function(input, output){
     return(ps)
   })
   
+  proteins<-reactive({
+    gene<-genes()
+    ps<-subset(pr,pr$Gene.ID %in% gene$Gene.ID) %>% spread(measurement,value)
+    return(ps)
+  })
+  
   pep<-reactive({
     peptides<-peptides()
-    if(length(input$protTable_rows_selected)==0){
+    if(dim(peptides)[1]==0){
+      return(NULL)
+    }
+    if(length(input$pepTable_rows_selected)==0){
       peps<-peptides[input$anno_rows_all[1],]
     }
     else{
-      peps<-peptides[input$protTable_rows_selected[1],]
+      peps<-peptides[input$pepTable_rows_selected[1],]
     }
     return(peps)
   })
@@ -194,7 +211,8 @@ server <- function(input, output){
      id<-pep$Seq.ID
 
      ##Cutout alterations
-     seq<-str_replace_all(pepseq,c("_"="","\\(.+\\)"="")) ##!!!SOME ARE (ph) not p!!!
+     seq<-str_replace_all(pepseq,c("_"="","\\([a-o,q-z]+\\)"=""))
+     seq<-str_replace_all(seq,"\\([a-z]+\\)","p")
      seqp<-str_replace_all(seq,"p","")
      ##Get protein sequence ##!! Loop for all isoforms?!!!
      fas<-fa[id]
@@ -207,7 +225,7 @@ server <- function(input, output){
      rloc
    })
   
-  output$protTable <- DT::renderDT({
+  output$pepTable <- DT::renderDT({
     ps<-peptides()
     if(dim(ps)[1]==0){
       return(NULL)
@@ -228,12 +246,15 @@ server <- function(input, output){
   output$pepText<-renderText({
     gene<-genes()
     pep<-pep()
+    if(is.null(pep)){
+      return(as.character(gene$Gene.Symbol))
+    }
     ploc<-seqloc()    
     text<-paste(c(as.character(gene$Gene.Symbol),pep$Uniprot.ID,pep$Sequence,ploc),collapse=" ")
     return(text)
   })
       
-  output$protPlot <- renderPlot({
+  output$pepPlot <- renderPlot({
     sig2=input$sig2
     values=cols
     names(values)<-c(paste0(" Significant <= ",sig2),paste0(" > ",sig2))
@@ -252,6 +273,28 @@ server <- function(input, output){
       theme_bw()+
       theme(text = element_text(size=20),legend.title = element_blank())+
       facet_grid(ID~Uniprot.ID)+#,scales="free",space="free")+
+      coord_flip()
+    g1
+  })
+  
+  output$protPlot <- renderPlot({
+    sig2=input$sig2
+    values=cols
+    names(values)<-c(paste0(" Significant <= ",sig2),paste0(" > ",sig2))
+    
+    ps<-proteins()
+    if(dim(ps)[1]==0){
+      return(NULL)
+    }
+    prot.name=unique(ps$Uniprot.ID)
+    g1<-ggplot(ps %>% mutate(fill = ifelse(pval<=sig2,paste0(" Significant <= ",sig2),paste0(" > ",sig2))),
+               aes(text=paste("pval:",pval)))+
+      geom_col(aes(x=Experiment,y=FoldChange,fill=fill))+
+      scale_fill_manual(values = values)+
+      theme_bw()+
+      ggtitle(prot.name)+
+      theme(text = element_text(size=20),legend.title = element_blank())+
+      facet_grid(~Uniprot.ID)+#,scales="free",space="free")+
       coord_flip()
     ##NEED SEQUENCE SOMEWHERE!!
     g1
